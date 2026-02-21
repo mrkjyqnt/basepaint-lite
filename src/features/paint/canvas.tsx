@@ -590,6 +590,7 @@ function Canvas({
           onPreviewAnimation={() => setShowAnimationPreview(true)}
           onPaste={(p) => dispatch({ type: "load-pixels", pixels: p })}
           pixels={state.pixels}
+          background={background}
         />
       </div>
 

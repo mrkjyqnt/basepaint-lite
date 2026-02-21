@@ -69,6 +69,19 @@ export async function copyStrokesToClipboard(pixels: Pixels): Promise<boolean> {
   return copyText(JSON.stringify(pixelsToStrokes(pixels)));
 }
 
+export async function copyStrokesWithoutOverprintToClipboard(
+  pixels: Pixels,
+  background: Pixels
+): Promise<boolean> {
+  const strokes: PixelStroke[] = [];
+  for (const { x, y, color } of pixels) {
+    if (background.get(x, y) !== color) {
+      strokes.push({ point: { x, y }, color });
+    }
+  }
+  return copyText(JSON.stringify(strokes));
+}
+
 export async function copyAnimationToClipboard(frames: Frame[]): Promise<boolean> {
   return copyText(JSON.stringify(framesToAnimationStrokes(frames)));
 }

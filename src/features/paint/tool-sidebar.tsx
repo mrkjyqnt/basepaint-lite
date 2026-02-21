@@ -13,7 +13,7 @@ import {
 } from "@/components/icons";
 import type { Tool, ShapeType } from "./canvas-reducer";
 import type { Frame } from "./frame-manager";
-import { copyStrokesToClipboard, pasteStrokesFromClipboard } from "@/lib/copy-strokes";
+import { copyStrokesToClipboard, copyStrokesWithoutOverprintToClipboard, pasteStrokesFromClipboard } from "@/lib/copy-strokes";
 import { Button } from "@/components/ui/button";
 import Pixels from "@/lib/pixels";
 
@@ -47,6 +47,7 @@ export default function ToolSidebar({
   onPreviewAnimation,
   onPaste,
   pixels,
+  background,
 }: {
   activeTool: Tool;
   onToolChange: (tool: Tool) => void;
@@ -64,9 +65,11 @@ export default function ToolSidebar({
   onPreviewAnimation: () => void;
   onPaste: (pixels: import("@/lib/pixels").default) => void;
   pixels: Pixels;
+  background: Pixels;
 }) {
   const [showShapes, setShowShapes] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedFiltered, setCopiedFiltered] = useState(false);
   const [pasted, setPasted] = useState(false);
 
   const showBrushSize = activeTool === "pencil" || activeTool === "eraser";
@@ -78,6 +81,14 @@ export default function ToolSidebar({
     if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  }
+
+  async function handleCopyNoOverprint() {
+    const ok = await copyStrokesWithoutOverprintToClipboard(pixels, background);
+    if (ok) {
+      setCopiedFiltered(true);
+      setTimeout(() => setCopiedFiltered(false), 2000);
     }
   }
 
@@ -228,6 +239,26 @@ export default function ToolSidebar({
           <span className="size-5"><CopyIcon /></span>
           <span className="text-[10px] leading-tight font-medium hidden sm:block">
             {copied ? "Copied!" : "Copy"}
+          </span>
+        </button>
+
+        {/* Copy without overprint */}
+        <button
+          onClick={handleCopyNoOverprint}
+          className={`flex flex-col items-center justify-center gap-0.5 rounded-md p-2 min-w-[2.5rem] sm:min-w-[3.5rem] transition-colors cursor-pointer shrink-0 ${
+            copiedFiltered
+              ? "bg-green-700 text-white"
+              : "text-white/70 hover:text-white hover:bg-white/10"
+          }`}
+          title="Copy stroke without overprinting existing canvas pixels"
+        >
+          <span className="size-5">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
+            </svg>
+          </span>
+          <span className="text-[10px] leading-tight font-medium hidden sm:block">
+            {copiedFiltered ? "Copied!" : "No Overprint"}
           </span>
         </button>
 
