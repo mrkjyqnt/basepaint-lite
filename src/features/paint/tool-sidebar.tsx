@@ -10,6 +10,7 @@ import {
   MoveArtIcon,
   CopyIcon,
   PlayIcon,
+  UploadIcon,
 } from "@/components/icons";
 import type { Tool, ShapeType } from "./canvas-reducer";
 import type { Frame } from "./frame-manager";
@@ -48,6 +49,8 @@ export default function ToolSidebar({
   onPaste,
   pixels,
   background,
+  isPanning,
+  onUploadImage,
 }: {
   activeTool: Tool;
   onToolChange: (tool: Tool) => void;
@@ -66,6 +69,8 @@ export default function ToolSidebar({
   onPaste: (pixels: import("@/lib/pixels").default) => void;
   pixels: Pixels;
   background: Pixels;
+  isPanning: boolean;
+  onUploadImage: () => void;
 }) {
   const [showShapes, setShowShapes] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -213,7 +218,7 @@ export default function ToolSidebar({
               }
             }}
             className={`flex flex-col items-center justify-center gap-0.5 rounded-md p-2 min-w-[2.5rem] sm:min-w-[3.5rem] transition-colors cursor-pointer shrink-0 ${
-              activeTool === tool.id
+              !isPanning && activeTool === tool.id
                 ? "bg-primary text-primary-foreground"
                 : "text-white/70 hover:text-white hover:bg-white/10"
             }`}
@@ -280,6 +285,16 @@ export default function ToolSidebar({
           <span className="text-[10px] leading-tight font-medium hidden sm:block">
             {pasted ? "Pasted!" : "Paste"}
           </span>
+        </button>
+
+        {/* Upload image */}
+        <button
+          onClick={onUploadImage}
+          className="flex flex-col items-center justify-center gap-0.5 rounded-md p-2 min-w-[2.5rem] sm:min-w-[3.5rem] transition-colors cursor-pointer shrink-0 text-white/70 hover:text-white hover:bg-white/10"
+          title="Upload 256×256 image"
+        >
+          <span className="size-5"><UploadIcon /></span>
+          <span className="text-[10px] leading-tight font-medium hidden sm:block">Upload</span>
         </button>
 
         {/* Animation toggle */}

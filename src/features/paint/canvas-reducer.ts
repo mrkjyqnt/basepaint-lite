@@ -67,7 +67,10 @@ export type Action =
   | { type: "set-background-opacity"; opacity: number }
   | { type: "load-pixels"; pixels: Pixels }
   | { type: "undo" }
-  | { type: "redo" };
+  | { type: "redo" }
+  | { type: "set-pixel-size"; pixelSize: number }
+  | { type: "flip-horizontal" }
+  | { type: "flip-vertical" };
 
 function inBounds(p: Point2D, size: number) {
   return p.x >= 0 && p.x < size && p.y >= 0 && p.y < size;
@@ -358,6 +361,25 @@ export function reducer(state: State, action: Action): State {
 
     case "zoom-out":
       return { ...state, pixelSize: Math.max(1, state.pixelSize - 1) };
+
+    case "set-pixel-size":
+      return { ...state, pixelSize: Math.max(1, Math.min(20, Math.round(action.pixelSize))) };
+
+    case "flip-horizontal": {
+      const entries: [number, number, number][] = [];
+      for (const { x, y, color } of state.pixels) {
+        entries.push([state.size - 1 - x, y, color]);
+      }
+      return { ...state, ...pushHistory(state), pixels: new Pixels().setMany(entries) };
+    }
+
+    case "flip-vertical": {
+      const entries: [number, number, number][] = [];
+      for (const { x, y, color } of state.pixels) {
+        entries.push([x, state.size - 1 - y, color]);
+      }
+      return { ...state, ...pushHistory(state), pixels: new Pixels().setMany(entries) };
+    }
 
     case "flood-fill": {
       if (!inBounds(action.where, state.size)) return state;

@@ -10,6 +10,8 @@ import {
   RedoIcon,
   GridIcon,
   HandIcon,
+  FlipHorizontalIcon,
+  FlipVerticalIcon,
 } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import type { Action } from "./canvas-reducer";
@@ -143,6 +145,24 @@ export default function Toolbar({
           title="Zoom Out"
         >
           <MagnifyingGlassMinus />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => dispatch({ type: "flip-horizontal" })}
+          className="text-white hover:text-white hover:bg-white/10"
+          title="Flip Horizontal"
+        >
+          <FlipHorizontalIcon />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => dispatch({ type: "flip-vertical" })}
+          className="text-white hover:text-white hover:bg-white/10"
+          title="Flip Vertical"
+        >
+          <FlipVerticalIcon />
         </Button>
 
         <div className="w-px h-5 bg-white/20 mx-0.5 shrink-0" />

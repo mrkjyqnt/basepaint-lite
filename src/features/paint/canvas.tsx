@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import Pixels from "@/lib/pixels";
 import { usePromise } from "@/lib/use-promise";
 import { BASEPAINT_ADDRESS, BRUSH_ADDRESS } from "@/lib/constants";
@@ -67,59 +67,34 @@ function Canvas({
   const panStartRef = useRef<{ x: number; y: number; scrollX: number; scrollY: number } | null>(null);
   const panActiveRef = useRef(false);
   const isSwitchingFrameRef = useRef(false);
+  const pinchRef = useRef<{ startDist: number; startPixelSize: number } | null>(null);
+  const prevPixelSizeRef = useRef(state.pixelSize);
+  const zoomCenterRef = useRef<{ x: number; y: number } | null>(null);
   const PIXEL_SIZE = state.pixelSize;
 
   const background = useMemo(() => Pixels.fromString(pixels), [pixels]);
 
-  // Pre-render background to offscreen canvas (once per background/palette/zoom change)
+  // Pre-render background to offscreen canvas at native resolution (zoom-independent)
   const bgCanvasRef = useRef<HTMLCanvasElement>(document.createElement("canvas"));
   const bgCacheKeyRef = useRef("");
   useMemo(() => {
-    const key = `${pixels}:${palette.join(",")}:${state.pixelSize}:${size}`;
+    const key = `${pixels}:${palette.join(",")}:${size}`;
     if (key === bgCacheKeyRef.current) return;
     bgCacheKeyRef.current = key;
-    const PS = state.pixelSize;
     const bg = bgCanvasRef.current;
-    bg.width = size * PS;
-    bg.height = size * PS;
+    bg.width = size;
+    bg.height = size;
     const ctx = bg.getContext("2d")!;
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = palette[0];
-    ctx.fillRect(0, 0, size * PS, size * PS);
+    ctx.fillRect(0, 0, size, size);
     for (const { x, y, color } of background) {
       if (palette[color]) {
         ctx.fillStyle = palette[color];
-        ctx.fillRect(x * PS, y * PS, PS, PS);
+        ctx.fillRect(x, y, 1, 1);
       }
     }
-  }, [background, palette, state.pixelSize, size, pixels]);
-
-  // Pre-render grid to offscreen canvas
-  const gridCanvasRef = useRef<HTMLCanvasElement>(document.createElement("canvas"));
-  const gridCacheKeyRef = useRef("");
-  useMemo(() => {
-    const key = `${state.pixelSize}:${size}`;
-    if (key === gridCacheKeyRef.current) return;
-    gridCacheKeyRef.current = key;
-    const PS = state.pixelSize;
-    const gc = gridCanvasRef.current;
-    gc.width = size * PS;
-    gc.height = size * PS;
-    const ctx = gc.getContext("2d")!;
-    ctx.clearRect(0, 0, gc.width, gc.height);
-    ctx.beginPath();
-    ctx.strokeStyle = "rgba(0,0,0,0.3)";
-    ctx.lineWidth = 1;
-    for (let x = 0; x <= size; x++) {
-      ctx.moveTo(x * PS, 0);
-      ctx.lineTo(x * PS, size * PS);
-    }
-    for (let y = 0; y <= size; y++) {
-      ctx.moveTo(0, y * PS);
-      ctx.lineTo(size * PS, y * PS);
-    }
-    ctx.stroke();
-  }, [state.pixelSize, size]);
+  }, [background, palette, size, pixels]);
 
   // Frame manager
   const { frameState, frameDispatch, activeFrame } = useFrames();
@@ -184,10 +159,58 @@ function Canvas({
           if (pixels) dispatch({ type: "load-pixels", pixels });
         });
       }
+      // Zoom shortcuts: Ctrl/Cmd + Plus/Minus
+      if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        dispatch({ type: "zoom-in" });
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "-" || e.key === "_")) {
+        e.preventDefault();
+        dispatch({ type: "zoom-out" });
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // Ctrl+Wheel zoom (needs native listener for passive: false)
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    function handleWheel(e: WheelEvent) {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const rect = el!.getBoundingClientRect();
+        zoomCenterRef.current = {
+          x: el!.scrollLeft + e.clientX - rect.left,
+          y: el!.scrollTop + e.clientY - rect.top,
+        };
+        dispatch(e.deltaY < 0 ? { type: "zoom-in" } : { type: "zoom-out" });
+      }
+    }
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Preserve scroll position when zooming
+  useLayoutEffect(() => {
+    const oldPS = prevPixelSizeRef.current;
+    const newPS = state.pixelSize;
+    prevPixelSizeRef.current = newPS;
+    if (oldPS === newPS) return;
+
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const scale = newPS / oldPS;
+    const center = zoomCenterRef.current;
+    const cx = center ? center.x : el.scrollLeft + el.clientWidth / 2;
+    const cy = center ? center.y : el.scrollTop + el.clientHeight / 2;
+
+    el.scrollLeft = cx * scale - el.clientWidth / 2;
+    el.scrollTop = cy * scale - el.clientHeight / 2;
+    zoomCenterRef.current = null;
+  }, [state.pixelSize]);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -372,66 +395,71 @@ function Canvas({
     }
   }
 
-  // Canvas rendering — coalesce with requestAnimationFrame
-  const rafRef = useRef<number>(undefined);
-  useEffect(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(() => {
-      const ctx = canvasRef.current?.getContext("2d");
-      if (!ctx) return;
+  // Canvas rendering — synchronous via useLayoutEffect to prevent flicker on zoom
+  useLayoutEffect(() => {
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
 
-      ctx.clearRect(0, 0, size * PIXEL_SIZE, size * PIXEL_SIZE);
-      ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, size * PIXEL_SIZE, size * PIXEL_SIZE);
+    ctx.imageSmoothingEnabled = false;
 
-      // White base so lowering BG opacity fades to white
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, size * PIXEL_SIZE, size * PIXEL_SIZE);
+    // White base so lowering BG opacity fades to white
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, size * PIXEL_SIZE, size * PIXEL_SIZE);
 
-      const bgOpacity = (state.backgroundOpacity ?? 100) / 100;
-      ctx.globalAlpha = bgOpacity;
-      // Draw pre-rendered background in one call instead of iterating all pixels
-      ctx.drawImage(bgCanvasRef.current, 0, 0);
-      ctx.globalAlpha = 1;
+    const bgOpacity = (state.backgroundOpacity ?? 100) / 100;
+    ctx.globalAlpha = bgOpacity;
+    // Scale native-res background up to zoomed size (GPU-accelerated)
+    ctx.drawImage(bgCanvasRef.current, 0, 0, size * PIXEL_SIZE, size * PIXEL_SIZE);
+    ctx.globalAlpha = 1;
 
-      if (state.showGrid) {
-        ctx.drawImage(gridCanvasRef.current, 0, 0);
+    if (state.showGrid) {
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(0,0,0,0.3)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= size; i++) {
+        const pos = i * PIXEL_SIZE;
+        ctx.moveTo(pos, 0);
+        ctx.lineTo(pos, size * PIXEL_SIZE);
+        ctx.moveTo(0, pos);
+        ctx.lineTo(size * PIXEL_SIZE, pos);
       }
+      ctx.stroke();
+    }
 
-      for (const { x, y, color } of state.pixels) {
-        if (palette[color]) {
-          ctx.fillStyle = palette[color];
-          ctx.fillRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
-        }
+    for (const { x, y, color } of state.pixels) {
+      if (palette[color]) {
+        ctx.fillStyle = palette[color];
+        ctx.fillRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
       }
+    }
 
-      // Shape preview overlay
-      if (state.rectStart && state.rectPreview) {
-        const minX = Math.min(state.rectStart.x, state.rectPreview.x);
-        const maxX = Math.max(state.rectStart.x, state.rectPreview.x);
-        const minY = Math.min(state.rectStart.y, state.rectPreview.y);
-        const maxY = Math.max(state.rectStart.y, state.rectPreview.y);
+    // Shape preview overlay
+    if (state.rectStart && state.rectPreview) {
+      const minX = Math.min(state.rectStart.x, state.rectPreview.x);
+      const maxX = Math.max(state.rectStart.x, state.rectPreview.x);
+      const minY = Math.min(state.rectStart.y, state.rectPreview.y);
+      const maxY = Math.max(state.rectStart.y, state.rectPreview.y);
 
-        ctx.fillStyle = palette[state.colorIndex] + "80";
+      ctx.fillStyle = palette[state.colorIndex] + "80";
 
-        if ((state.shapeType ?? "rectangle") === "ellipse") {
-          const cx = ((minX + maxX + 1) / 2) * PIXEL_SIZE;
-          const cy = ((minY + maxY + 1) / 2) * PIXEL_SIZE;
-          const rx = ((maxX - minX + 1) / 2) * PIXEL_SIZE;
-          const ry = ((maxY - minY + 1) / 2) * PIXEL_SIZE;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          ctx.fillRect(
-            minX * PIXEL_SIZE,
-            minY * PIXEL_SIZE,
-            (maxX - minX + 1) * PIXEL_SIZE,
-            (maxY - minY + 1) * PIXEL_SIZE
-          );
-        }
+      if ((state.shapeType ?? "rectangle") === "ellipse") {
+        const cx = ((minX + maxX + 1) / 2) * PIXEL_SIZE;
+        const cy = ((minY + maxY + 1) / 2) * PIXEL_SIZE;
+        const rx = ((maxX - minX + 1) / 2) * PIXEL_SIZE;
+        const ry = ((maxY - minY + 1) / 2) * PIXEL_SIZE;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(
+          minX * PIXEL_SIZE,
+          minY * PIXEL_SIZE,
+          (maxX - minX + 1) * PIXEL_SIZE,
+          (maxY - minY + 1) * PIXEL_SIZE
+        );
       }
-    });
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [palette, PIXEL_SIZE, size, state.pixels, state.drawTick, state.rectStart, state.rectPreview, state.colorIndex, state.showGrid, state.shapeType, state.backgroundOpacity]);
 
@@ -520,6 +548,56 @@ function Canvas({
   const isDrawTool = ["pencil", "eraser", "shape", "bucket", "move-art"].includes(state.activeTool);
   const touchAction = isPanning ? "none" : isDrawTool ? "none" : "auto";
 
+  const handleUploadImage = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const img = new Image();
+      img.onload = () => {
+        if (img.width !== size || img.height !== size) {
+          alert(`Image must be ${size}\u00d7${size} pixels. Got ${img.width}\u00d7${img.height}.`);
+          URL.revokeObjectURL(img.src);
+          return;
+        }
+        const cvs = document.createElement("canvas");
+        cvs.width = size;
+        cvs.height = size;
+        const ctx = cvs.getContext("2d")!;
+        ctx.drawImage(img, 0, 0);
+        const { data } = ctx.getImageData(0, 0, size, size);
+        const paletteRGB = palette.map((hex) => ({
+          r: parseInt(hex.slice(1, 3), 16),
+          g: parseInt(hex.slice(3, 5), 16),
+          b: parseInt(hex.slice(5, 7), 16),
+        }));
+        const entries: [number, number, number][] = [];
+        for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+            const i = (y * size + x) * 4;
+            if (data[i + 3] < 128) continue;
+            const r = data[i], g = data[i + 1], b = data[i + 2];
+            let bestIdx = 0, bestDist = Infinity;
+            for (let c = 0; c < paletteRGB.length; c++) {
+              const dr = r - paletteRGB[c].r;
+              const dg = g - paletteRGB[c].g;
+              const db = b - paletteRGB[c].b;
+              const dist = dr * dr + dg * dg + db * db;
+              if (dist < bestDist) { bestDist = dist; bestIdx = c; }
+            }
+            entries.push([x, y, bestIdx]);
+          }
+        }
+        dispatch({ type: "load-pixels", pixels: new Pixels().setMany(entries) });
+        URL.revokeObjectURL(img.src);
+      };
+      img.src = URL.createObjectURL(file);
+    };
+    input.click();
+  }, [palette, size]);
+
   return (
     <div className="flex flex-col flex-1 h-screen">
       <Toolbar
@@ -543,21 +621,58 @@ function Canvas({
       <div className="flex flex-col flex-1 overflow-hidden">
         <div
           ref={scrollRef}
-          className="flex-1 overflow-auto flex items-start justify-center"
+          className="flex-1 overflow-auto"
         >
           <canvas
             ref={canvasRef}
             className={cursorClass}
             onTouchStart={(e) => {
               e.preventDefault();
+              if (e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                pinchRef.current = {
+                  startDist: Math.hypot(dx, dy),
+                  startPixelSize: state.pixelSize,
+                };
+                dispatch({ type: "up" });
+                return;
+              }
+              if (pinchRef.current) return;
               handlePointerDown(e);
             }}
             onTouchMove={(e) => {
               e.preventDefault();
+              if (e.touches.length === 2 && pinchRef.current) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const dist = Math.hypot(dx, dy);
+                const scale = dist / pinchRef.current.startDist;
+                const newPS = Math.max(1, Math.min(20, Math.round(pinchRef.current.startPixelSize * scale)));
+                if (newPS !== state.pixelSize) {
+                  const el = scrollRef.current;
+                  if (el) {
+                    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                    const rect = el.getBoundingClientRect();
+                    zoomCenterRef.current = {
+                      x: el.scrollLeft + midX - rect.left,
+                      y: el.scrollTop + midY - rect.top,
+                    };
+                  }
+                  dispatch({ type: "set-pixel-size", pixelSize: newPS });
+                }
+                return;
+              }
+              if (pinchRef.current) return;
               handlePointerMove(e);
             }}
             onTouchEnd={(e) => {
               e.preventDefault();
+              if (pinchRef.current) {
+                if (e.touches.length < 2) pinchRef.current = null;
+                return;
+              }
               handlePointerUp(e);
             }}
             onMouseDown={handlePointerDown}
@@ -570,12 +685,15 @@ function Canvas({
             onContextMenu={(e) => e.preventDefault()}
             width={size * PIXEL_SIZE}
             height={size * PIXEL_SIZE}
-            style={{ touchAction }}
+            style={{ display: "block", margin: "0 auto", touchAction }}
           />
         </div>
         <ToolSidebar
           activeTool={state.activeTool}
-          onToolChange={(tool) => dispatch({ type: "set-tool", tool })}
+          onToolChange={(tool) => {
+            setIsPanning(false);
+            dispatch({ type: "set-tool", tool });
+          }}
           shapeType={state.shapeType ?? "rectangle"}
           onShapeChange={(shape) => dispatch({ type: "set-shape", shape })}
           brushSize={state.brushSize ?? 1}
@@ -591,6 +709,8 @@ function Canvas({
           onPaste={(p) => dispatch({ type: "load-pixels", pixels: p })}
           pixels={state.pixels}
           background={background}
+          isPanning={isPanning}
+          onUploadImage={handleUploadImage}
         />
       </div>
 
