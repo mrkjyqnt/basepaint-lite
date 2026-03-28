@@ -11,6 +11,7 @@ import {
   CopyIcon,
   PlayIcon,
   UploadIcon,
+  SaveImageIcon,
 } from "@/components/icons";
 import type { Tool, ShapeType } from "./canvas-reducer";
 import type { Frame } from "./frame-manager";
@@ -51,6 +52,7 @@ export default function ToolSidebar({
   background,
   isPanning,
   onUploadImage,
+  onSaveImage,
 }: {
   activeTool: Tool;
   onToolChange: (tool: Tool) => void;
@@ -71,6 +73,7 @@ export default function ToolSidebar({
   background: Pixels;
   isPanning: boolean;
   onUploadImage: () => void;
+  onSaveImage: () => void;
 }) {
   const [showShapes, setShowShapes] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -205,7 +208,7 @@ export default function ToolSidebar({
       )}
 
       {/* Main tool row */}
-      <div className="flex items-center justify-center gap-1 p-2 bg-black overflow-x-auto">
+      <div className="flex items-center gap-1 p-2 bg-black overflow-x-auto">
         {mainTools.map((tool) => (
           <button
             key={tool.id}
@@ -295,6 +298,16 @@ export default function ToolSidebar({
         >
           <span className="size-5"><UploadIcon /></span>
           <span className="text-[10px] leading-tight font-medium hidden sm:block">Upload</span>
+        </button>
+
+        {/* Save as image */}
+        <button
+          onClick={onSaveImage}
+          className="flex flex-col items-center justify-center gap-0.5 rounded-md p-2 min-w-[2.5rem] sm:min-w-[3.5rem] transition-colors cursor-pointer shrink-0 text-white/70 hover:text-white hover:bg-white/10"
+          title="Save as 256×256 transparent PNG"
+        >
+          <span className="size-5"><SaveImageIcon /></span>
+          <span className="text-[10px] leading-tight font-medium hidden sm:block">Save</span>
         </button>
 
         {/* Animation toggle */}

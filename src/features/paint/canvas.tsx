@@ -548,6 +548,23 @@ function Canvas({
   const isDrawTool = ["pencil", "eraser", "shape", "bucket", "move-art"].includes(state.activeTool);
   const touchAction = isPanning ? "none" : isDrawTool ? "none" : "auto";
 
+  const handleSaveImage = useCallback(() => {
+    const cvs = document.createElement("canvas");
+    cvs.width = size;
+    cvs.height = size;
+    const ctx = cvs.getContext("2d")!;
+    for (const { x, y, color } of state.pixels) {
+      if (palette[color]) {
+        ctx.fillStyle = palette[color];
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    const link = document.createElement("a");
+    link.download = "basepaint-art.png";
+    link.href = cvs.toDataURL("image/png");
+    link.click();
+  }, [state.pixels, palette, size]);
+
   const handleUploadImage = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
@@ -711,6 +728,7 @@ function Canvas({
           background={background}
           isPanning={isPanning}
           onUploadImage={handleUploadImage}
+          onSaveImage={handleSaveImage}
         />
       </div>
 

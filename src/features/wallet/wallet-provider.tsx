@@ -1,7 +1,9 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
+import { createPublicClient, http } from "viem";
 import type { Address } from "viem";
+import { base } from "viem/chains";
 import { useClient, type Client } from "./use-client";
 import { useWallet } from "./use-wallet";
 import { useCurrentChainId } from "./use-chain";
@@ -28,6 +30,11 @@ export function useWalletContext() {
 
 export function WalletGuard({ children }: { children: React.ReactNode }) {
   const client = useClient();
+  const [skipped, setSkipped] = useState(false);
+
+  if (skipped) {
+    return <GuestMode>{children}</GuestMode>;
+  }
 
   if (!client) {
     const isMobile = /iPhone|iPad|iPod|Android/i.test(
@@ -62,21 +69,53 @@ export function WalletGuard({ children }: { children: React.ReactNode }) {
                 Please install MetaMask or similar Ethereum wallet extension.
               </p>
             )}
+            <Button
+              variant="ghost"
+              size="lg"
+              className="w-full"
+              onClick={() => setSkipped(true)}
+            >
+              Continue without wallet
+            </Button>
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  return <WalletConnected client={client}>{children}</WalletConnected>;
+  return <WalletConnected client={client} onSkip={() => setSkipped(true)}>{children}</WalletConnected>;
+}
+
+function GuestMode({ children }: { children: React.ReactNode }) {
+  const client = useMemo(() => {
+    return createPublicClient({
+      chain: base,
+      transport: http(),
+    }) as unknown as Client;
+  }, []);
+
+  return (
+    <WalletContext.Provider
+      value={{
+        client,
+        address: "0x0000000000000000000000000000000000000000" as Address,
+        currentChainId: base.id,
+        switchChain: () => {},
+      }}
+    >
+      {children}
+    </WalletContext.Provider>
+  );
 }
 
 function WalletConnected({
   client,
   children,
+  onSkip,
 }: {
   client: Client;
   children: React.ReactNode;
+  onSkip: () => void;
 }) {
   const { address, connect } = useWallet(client);
   const { currentChainId, switchChain } = useCurrentChainId(client);
@@ -89,6 +128,9 @@ function WalletConnected({
             <BasePaintHero />
             <Button onClick={connect} size="lg" className="w-full">
               Connect Wallet
+            </Button>
+            <Button variant="ghost" size="lg" className="w-full" onClick={onSkip}>
+              Continue without wallet
             </Button>
           </CardContent>
         </Card>
